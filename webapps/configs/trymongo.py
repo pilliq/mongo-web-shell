@@ -21,3 +21,4 @@ HOST = '0.0.0.0'
 LOGGING_CONF = 'webapps/configs/logging.yaml'
 PORT = 8080
 MWS_HOST = 'http://localhost:5000'
+

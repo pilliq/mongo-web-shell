@@ -201,12 +201,17 @@ class DBCollectionTestCase(DBTestCase):
         self.db_collection.drop()
 
     def make_find_request(self, query=None, projection=None, skip=None,
-                          limit=None, expected_status=200):
+                          limit=None, expected_status=200, cursor_id=0,
+                          retrieved=0, count=0, drain_cursor=False):
         data = {
             'query': query,
             'projection': projection,
             'skip': skip,
             'limit': limit,
+            'cursor_id': cursor_id,
+            'retrieved': retrieved,
+            'count': count,
+            'drain_cursor': drain_cursor
         }
         return self._make_request('find', data, self.app.get,
                                   expected_status)
@@ -259,6 +264,43 @@ class FindUnitTestCase(DBCollectionTestCase):
         result = self.make_find_request(query)
         self.assertEqual(len(result), 1)
         self.assertEqual(result['result'][0]['name'], 'mongo')
+
+    def test_cursor(self):
+        num_docs = 250
+        docs = [{'val': i} for i in xrange(num_docs)]
+        batch_size = self.real_app.config['CURSOR_BATCH_SIZE']
+        num_received = 0
+
+        self.db_collection.insert(docs)
+
+        query = {}
+        response = self.make_find_request(query=query)
+
+        self.assertEqual(response['count'], num_docs)
+
+        while num_received != num_docs:
+            values = [r['val'] for r in response['result']]
+            cursor_id = response['cursor_id']
+            retrieved = len(response['result'])
+
+            self.assertItemsEqual(
+                values, range(num_received, num_received+retrieved))
+        
+            num_received += retrieved
+            response = self.make_find_request(query=query, cursor_id=cursor_id,
+                                              retrieved=retrieved, count=count)
+
+        # test around the batch_size
+        # test even/odd
+
+    def test_cursor_drain(self):
+        pass
+
+    def test_cursor_with_limit(self):
+        pass
+
+    def test_cursor_to_array(self):
+        pass
 
     def test_skipping_results(self):
         self.db_collection.insert([{'val': i} for i in xrange(10)])

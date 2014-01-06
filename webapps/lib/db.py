@@ -17,6 +17,7 @@ from urlparse import urlparse
 
 from flask import current_app
 import pymongo
+from pymongo.cursor_manager import CursorManager
 
 from MWSServerError import MWSServerError
 
@@ -24,8 +25,34 @@ _logger = logging.getLogger(__name__)
 
 db = None
 
+class KeepAliveCursorManager(CursorManager):
+    """A cursor manager that does not kill cursors
+    """
+    def close(self, cursor_id):
+        # refuse to kill a cursor
+        print("Refusing to kill cursor")
+        pass
 
-def get_db(MWSExceptions=True):
+def get_keepalive_db(MWSExceptions=True):
+    config = current_app.config
+    try:
+        client = pymongo.MongoClient(
+            config.get('DB_HOST'),
+            config.get('DB_PORT'))
+        client.set_cursor_manager(KeepAliveCursorManager)
+        db = client[config.get('DB_NAME')]
+        if 'username' in config:
+            db.authenticate(config.get('username'), config.get('password'))
+        return db
+    except Exception as e:
+        if MWSExceptions:
+            debug = config['DEBUG']
+            msg = str(e) if debug else 'An unexpected error occurred.'
+            raise MWSServerError(500, msg)
+        raise
+     
+
+def get_db(MWSExceptions=True, keep_cursors_alive=False):
     global db
     config = current_app.config
     # TODO: Ensure MongoClient connection is still active.
@@ -35,6 +62,10 @@ def get_db(MWSExceptions=True):
         client = pymongo.MongoClient(
             config.get('DB_HOST'),
             config.get('DB_PORT'))
+        print(keep_cursors_alive)
+        if keep_cursors_alive:
+            print("Keeping cursors alive")
+            client.set_cursor_manager(KeepAliveCursorManager)
         db = client[config.get('DB_NAME')]
         if 'username' in config:
             db.authenticate(config.get('username'), config.get('password'))
