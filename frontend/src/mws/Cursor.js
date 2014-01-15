@@ -50,10 +50,13 @@ mongo.Cursor = function (collection, query, projection) {
 mongo.Cursor.prototype._executeQuery = function (onSuccess, async, drainCursor) {
   async = typeof async !== 'undefined' ? async : true;
   drainCursor = typeof drainCursor !== 'undefined' ? drainCursor : false;
-  console.debug("Drain cursor: " + drainCursor);
-  console.debug("Current result length: " + this._result.length);
+  console.debug('Drain cursor: ' + drainCursor);
+  console.debug('Current result length: ' + this._result.length);
   console.debug(this._result.length);
-  if ((!this._executed || this._retrieved < this._count) && (this._result.length === 0 || drainCursor)) {
+  console.debug('ASYNC');
+  console.debug(async);
+  if ((!this._executed || this._retrieved < this._count) &&
+      (this._result.length === 0 || drainCursor)) {
     console.debug('Executing query:', this);
 
     var url = this._coll.urlBase + 'find';
@@ -75,6 +78,7 @@ mongo.Cursor.prototype._executeQuery = function (onSuccess, async, drainCursor) 
       this._count = data.count || this._count;
       this._retrieved += data.result.length;
       if (onSuccess) {
+          console.debug('SUCCESS');
         onSuccess();
       }
     }.bind(this);
@@ -206,12 +210,11 @@ mongo.Cursor.prototype.limit = function (limit) {
 };
 
 mongo.Cursor.prototype.batchSize = function (batchSize) {
-  throw new Error("batchSize() is disallowed in the web shell");
+  throw new Error('batchSize() is disallowed in the web shell');
 };
 
 mongo.Cursor.prototype.toArray = function (callback) {
   var context = this._shell.evaluator.pause();
-  console.debug("Inside toArray");
   if (this._arr) {
     this._shell.evaluator.resume(context, this._arr);
     if (callback) {
@@ -220,7 +223,6 @@ mongo.Cursor.prototype.toArray = function (callback) {
     return;
   }
 
-  console.debug("Executing toArray query");
   this._executeQuery(function () {
     console.debug(this._result);
     // This is the wrong way to do this. We really should be calling next as

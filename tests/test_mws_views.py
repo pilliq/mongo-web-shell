@@ -22,6 +22,7 @@ from webapps.lib.db import get_db
 from webapps.lib.util import get_internal_coll_name, get_collection_names
 from flask import session
 
+from pymongo.cursor import Cursor
 from pymongo.errors import OperationFailure
 from webapps.lib.MWSServerError import MWSServerError
 
@@ -213,6 +214,7 @@ class DBCollectionTestCase(DBTestCase):
             'count': count,
             'drain_cursor': drain_cursor
         }
+        print(data)
         return self._make_request('find', data, self.app.get,
                                   expected_status)
 
@@ -257,50 +259,105 @@ class DBCollectionTestCase(DBTestCase):
 
 
 class FindUnitTestCase(DBCollectionTestCase):
-    def test_find(self):
-        query = {'name': 'mongo'}
-        self.db_collection.insert(query)
-
-        result = self.make_find_request(query)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result['result'][0]['name'], 'mongo')
-
-    def test_cursor(self):
-        num_docs = 250
-        docs = [{'val': i} for i in xrange(num_docs)]
+    def ensure_cursor_death(self, collection, cursor_id, retrieved):
         batch_size = self.real_app.config['CURSOR_BATCH_SIZE']
-        num_received = 0
+        cursor = Cursor(collection, _cursor_id=cursor_id, 
+                        limit=batch_size, _retrieved=retrieved)
+        try:
+            cursor.next()
+        except StopIteration:
+            pass
+        except OperationFailure:
+            pass
+        else:
+            self.fail('Cursor was not killed')
+
+    def verify_cursor(self, num_docs, **kwargs):
+        self.db_collection.drop()
+
+        docs = [{'val': i} for i in xrange(num_docs)]
+        total_received = 0
 
         self.db_collection.insert(docs)
 
         query = {}
-        response = self.make_find_request(query=query)
+        response = self.make_find_request(query=query, **kwargs)
+        count = response['count']
 
-        self.assertEqual(response['count'], num_docs)
+        if kwargs.get('limit') is not None:
+            self.assertEqual(count, kwargs['limit'])
+        else:
+            self.assertEqual(count, num_docs)
 
-        while num_received != num_docs:
+        expected = kwargs['limit'] if kwargs.get('limit') else num_docs
+
+        if kwargs.get('drain_cursor'):
+            self.assertEqual(len(response['result']), count) 
+            total_received += len(response['result'])
+
+        while total_received != expected:
             values = [r['val'] for r in response['result']]
             cursor_id = response['cursor_id']
             retrieved = len(response['result'])
 
             self.assertItemsEqual(
-                values, range(num_received, num_received+retrieved))
+                values, range(total_received, total_received+retrieved))
         
-            num_received += retrieved
+            total_received += retrieved
+            if total_received == expected:
+                break
             response = self.make_find_request(query=query, cursor_id=cursor_id,
-                                              retrieved=retrieved, count=count)
+                                              retrieved=total_received, 
+                                              count=count, **kwargs)
 
-        # test around the batch_size
-        # test even/odd
+        self.ensure_cursor_death(self.db_collection, 
+                long(response['cursor_id']), retrieved=total_received)
 
-    def test_cursor_drain(self):
-        pass
+    def test_find(self):
+        query = {'name': 'mongo'}
+        self.db_collection.insert(query)
+
+        result = self.make_find_request(query)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result['count'], 1)
+        self.assertEqual(result['cursor_id'], '0')
+        self.assertEqual(len(result['result']), 1)
+        self.assertEqual(result['result'][0]['name'], 'mongo')
+
+    def test_cursor(self):
+        batch_size = self.real_app.config['CURSOR_BATCH_SIZE']
+
+        self.verify_cursor(83)
+        self.verify_cursor(100)
+        self.verify_cursor(250)
+        self.verify_cursor(batch_size)
+        self.verify_cursor(batch_size+1)
+        self.verify_cursor(batch_size-1)
 
     def test_cursor_with_limit(self):
-        pass
+        batch_size = self.real_app.config['CURSOR_BATCH_SIZE']
 
-    def test_cursor_to_array(self):
-        pass
+        self.verify_cursor(100, limit=83)
+        self.verify_cursor(100, limit=100)
+        self.verify_cursor(100, limit=batch_size)
+        self.verify_cursor(100, limit=batch_size+1)
+        self.verify_cursor(100, limit=batch_size-1)
+
+    def test_cursor_drain(self):
+        batch_size = self.real_app.config['CURSOR_BATCH_SIZE']
+
+        self.verify_cursor(100, drain_cursor=True)
+        self.verify_cursor(batch_size, drain_cursor=True)
+        self.verify_cursor(batch_size+1, drain_cursor=True)
+        self.verify_cursor(batch_size-1, drain_cursor=True)
+
+    def test_cursor_drain_with_limit(self):
+        batch_size = self.real_app.config['CURSOR_BATCH_SIZE']
+
+        self.verify_cursor(100, limit=100, drain_cursor=True)
+        self.verify_cursor(100, limit=batch_size, drain_cursor=True)
+        self.verify_cursor(100, limit=batch_size+1, drain_cursor=True)
+        self.verify_cursor(100, limit=batch_size-1, drain_cursor=True)
 
     def test_skipping_results(self):
         self.db_collection.insert([{'val': i} for i in xrange(10)])

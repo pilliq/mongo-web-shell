@@ -170,6 +170,7 @@ def db_collection_find(res_id, collection_name):
             # count is only available before cursor is read so we include it
             # in the first response
             result['count'] = cursor.count(with_limit_and_skip=True) 
+            count = result['count']
             print("Count: " + str(result['count']))
 
         print("Limit: " + str(limit))
@@ -201,6 +202,11 @@ def db_collection_find(res_id, collection_name):
         print("Returned: " + str(len(result['result'])))
         # close the Cursor object, but keep the cursor alive on the server
         del cursor # calls Manager.close()
+
+        # Kill cursor on server if all results are returned
+        print("COUNT: " + str(count), "RETRIEVED: " + str(retrieved), "RETURN RESULT: " + str(len(result['result'])))
+        if count == retrieved + len(result['result']):
+            kill_cursor(coll, long(result['cursor_id']))
         
         print("Returned cursor id: " + str(result['cursor_id']))
         print("Returned json: " + str(to_json(result)))
@@ -393,6 +399,26 @@ def db_drop(res_id):
         return empty_success()
 
 
+def create_cursor(collection, query=None, projection=None, sort=None, skip=0,
+                  limit=0, batch_size=-1):
+    """
+    A batch_size of -1 will return a cursor with no batch_size
+    """
+    print("Creating a new cursor!!!!")
+    # Need the below since mutable default values persist between calls
+    if query is None: query = {}
+    if sort is None: sort = {}
+
+    if batch_size == -1:
+        cursor = collection.find(query=query, projection=projection, skip=skip, limit=limit)
+    else:
+        cursor = collection.find(
+            query=query, projection=projection, skip=skip, limit=limit).batch_size(batch_size)
+
+    if len(sort) > 0:
+        cursor.sort(sort)
+    return cursor
+
 def recreate_cursor(collection, cursor_id, retrieved, batch_size, total_count):
     """
     Creates and returns a Cursor object based on an existing cursor in the
@@ -425,25 +451,10 @@ def recreate_cursor(collection, cursor_id, retrieved, batch_size, total_count):
     print("Cursor previously retrieved: " + str(cursor._Cursor__retrieved))
     return cursor
 
-def create_cursor(collection, query=None, projection=None, sort=None, skip=0,
-                  limit=0, batch_size=-1):
-    """
-    A batch_size of -1 will return a cursor with no batch_size
-    """
-    print("Creating a new cursor!!!!")
-    # Need the below since mutable default values persist between calls
-    if query is None: query = {}
-    if sort is None: sort = {}
-
-    if batch_size == -1:
-        cursor = collection.find(query=query, projection=projection, skip=skip, limit=limit)
-    else:
-        cursor = collection.find(
-            query=query, projection=projection, skip=skip, limit=limit).batch_size(batch_size)
-
-    if len(sort) > 0:
-        cursor.sort(sort)
-    return cursor
+def kill_cursor(collection, cursor_id):
+    print("KILL THE CURSOR")
+    client = collection.database.connection
+    client.kill_cursors([cursor_id])
 
 def generate_res_id():
     return str(uuid.uuid4())
